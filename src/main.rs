@@ -1,6 +1,8 @@
+use anyhow::anyhow;
 use kurobako_core::epi::channel::{MessageReceiver, MessageSender};
 use kurobako_core::epi::solver::SolverMessage;
-use kurobako_core::solver::{Capability, SolverSpecBuilder};
+use kurobako_core::solver::{Capability, Solver as _, SolverSpecBuilder};
+use kurobako_core::trial::IdGen;
 use std::collections::HashMap;
 use structopt::StructOpt;
 
@@ -38,10 +40,22 @@ fn main() -> anyhow::Result<()> {
                 solver_id,
                 next_trial_id,
             } => {
-                todo!();
+                let solver = solvers
+                    .get_mut(&solver_id)
+                    .ok_or_else(|| anyhow!("unknown solver {:?}", solver_id))?;
+                let mut idg = IdGen::from_next_id(next_trial_id);
+                let trial = solver.ask(&mut idg)?;
+                tx.send(&SolverMessage::AskReply {
+                    next_trial_id: idg.peek_id().get(),
+                    trial,
+                })?;
             }
             SolverMessage::TellCall { solver_id, trial } => {
-                todo!();
+                let solver = solvers
+                    .get_mut(&solver_id)
+                    .ok_or_else(|| anyhow!("unknown solver {:?}", solver_id))?;
+                solver.tell(trial)?;
+                tx.send(&SolverMessage::TellReply {})?;
             }
             SolverMessage::DropSolverCast { solver_id } => {
                 solvers.remove(&solver_id);
