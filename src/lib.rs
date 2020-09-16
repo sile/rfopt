@@ -8,13 +8,15 @@ use randomforest::RandomForestRegressor;
 
 #[derive(Debug)]
 pub struct RfOpt {
+    seed: u64,
     problem: ProblemSpec,
     trials: Vec<Trial>,
 }
 
 impl RfOpt {
-    pub fn new(problem: ProblemSpec) -> Self {
+    pub fn new(seed: u64, problem: ProblemSpec) -> Self {
         Self {
+            seed,
             problem,
             trials: Vec::new(),
         }
