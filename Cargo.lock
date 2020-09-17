@@ -176,6 +176,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e88a8acf291dafb59c2d96e8f59828f3838bb1a70398823ade51a84de6a6deed"
 
 [[package]]
+name = "fanova"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33d023baa748da9617a76ad296cf5c3f6d53edcbe3ebe08dbb40f2f7f461ee14"
+dependencies = [
+ "itertools 0.9.0",
+ "ordered-float 2.0.0",
+ "rand",
+ "rayon",
+ "thiserror",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -223,6 +236,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "284f18f85651fe11e8a991b2adb42cb078325c996ed026d994719efcfca1d54b"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -230,11 +252,11 @@ checksum = "dc6f3ad7b9d11a0c00842ff8de1b60ee58661048eb8049ed33c73594f359d7e6"
 
 [[package]]
 name = "kurobako_core"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35d09890f162bf76e801b06d24b0d3c0ce6b3b9f1b62f25dc447618170a8100e"
+checksum = "40bc7ccdd0b6812b61bbd64c78d8ea96a30830b448cca912746cf2ec24f08a19"
 dependencies = [
- "itertools",
+ "itertools 0.8.2",
  "lazy_static",
  "ordered-float 1.1.0",
  "rand",
@@ -414,9 +436,9 @@ dependencies = [
 
 [[package]]
 name = "randomforest"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f44860f864e8a5747f5c5a18091a0c29c73b5966ab12c2ff787a1e67e1254ac"
+checksum = "25bac8229b0174adfea5db259008ff7f3f4451915bb80b423cf787f78dd98d2b"
 dependencies = [
  "byteorder",
  "ordered-float 2.0.0",
@@ -470,8 +492,10 @@ name = "rfopt"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "fanova",
  "kurobako_core",
  "ordered-float 2.0.0",
+ "rand",
  "randomforest",
  "structopt",
 ]

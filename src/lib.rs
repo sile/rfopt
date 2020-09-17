@@ -15,7 +15,8 @@ pub struct RfOpt {
     trials: Vec<Trial>,
     evaluating: HashMap<TrialId, Params>,
     rng: ArcRng,
-    // TODO: Phase
+    best_value: f64,
+    level: i32, // TODO: rename
 }
 
 impl RfOpt {
@@ -25,6 +26,8 @@ impl RfOpt {
             trials: Vec::new(),
             evaluating: HashMap::new(),
             rng: ArcRng::new(seed),
+            best_value: std::f64::INFINITY,
+            level: 0,
         }
     }
 
@@ -87,8 +90,31 @@ impl RfOpt {
         Params::new(params)
     }
 
-    fn sample(&mut self, params: &[f64], param_index: usize) -> f64 {
-        todo!()
+    fn sample(&mut self, rf: &RandomForestRegressor, params: &[f64], param_index: usize) -> f64 {
+        let mut params = params
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|x| x.1.is_finite())
+            .collect::<Vec<_>>();
+        let last = params.len();
+        params.push((param_index, 0.0));
+
+        let mut best_param = std::f64::NAN;
+        let mut best_score = std::f64::INFINITY;
+        for _ in 0..1000 {
+            let p = self.problem.params_domain.variables()[param_index].sample(&mut self.rng);
+            params[last].1 = p;
+
+            let (mean, stddev) = mean_and_stddev(rf.marginal_predict_individuals(&params));
+            let score = mean - stddev * 2f64.powi(self.level);
+            if score < best_score {
+                best_param = p;
+                best_score = score;
+            }
+        }
+
+        best_param
     }
 }
 
@@ -103,7 +129,7 @@ impl Solver for RfOpt {
             let ranking = self.calc_params_ranking().expect("TODO");
             let mut params = vec![std::f64::NAN; self.problem.params_domain.variables().len()];
             for i in ranking {
-                params[i] = self.sample(&params, i);
+                params[i] = self.sample(&rf, &params, i);
             }
             Params::new(params)
         };
@@ -122,6 +148,18 @@ impl Solver for RfOpt {
             params: params.into_vec(),
             value: trial.values[0],
         });
+
+        // TODO
+        if trial.values[0] < self.best_value {
+            self.best_value = trial.values[0];
+            self.level += 1;
+        } else {
+            self.level -= 1;
+            if self.level == -5 {
+                self.level = 2;
+            }
+        }
+
         Ok(())
     }
 }
@@ -130,4 +168,12 @@ impl Solver for RfOpt {
 pub struct Trial {
     pub params: Vec<f64>,
     pub value: f64,
+}
+
+fn mean_and_stddev(xs: impl Iterator<Item = f64>) -> (f64, f64) {
+    let xs = xs.collect::<Vec<_>>();
+
+    let mean = xs.iter().sum::<f64>() / xs.len() as f64;
+    let var = xs.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / xs.len() as f64;
+    (mean, var.sqrt())
 }
