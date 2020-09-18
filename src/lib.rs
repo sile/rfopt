@@ -6,8 +6,9 @@ use ordered_float::OrderedFloat;
 use rand::distributions::Distribution as _;
 use randomforest::criterion::Mse;
 use randomforest::table::{ColumnType, TableBuilder};
-use randomforest::RandomForestRegressor;
+use randomforest::{RandomForestRegressor, RandomForestRegressorOptions};
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 
 #[derive(Debug)]
 pub struct RfOpt {
@@ -16,6 +17,7 @@ pub struct RfOpt {
     evaluating: HashMap<TrialId, Params>,
     rng: ArcRng,
     best_value: f64,
+    best_params: Params,
     level: i32, // TODO: rename
 }
 
@@ -27,6 +29,7 @@ impl RfOpt {
             evaluating: HashMap::new(),
             rng: ArcRng::new(seed),
             best_value: std::f64::INFINITY,
+            best_params: Params::new(Vec::new()),
             level: 0,
         }
     }
@@ -50,7 +53,7 @@ impl RfOpt {
         table.set_feature_column_types(&columns)?;
 
         self.trials.sort_by_key(|t| OrderedFloat(t.value));
-        let n = (self.trials.len() as f64 * 0.8) as usize;
+        let n = (self.trials.len() as f64 * 0.9) as usize;
         for t in &self.trials[..n] {
             table.add_row(&t.params, t.value)?;
         }
@@ -58,27 +61,9 @@ impl RfOpt {
             table.add_row(&t.params, self.trials[n].value)?;
         }
 
-        Ok(RandomForestRegressor::fit(Mse, table.build()?))
-    }
-
-    fn calc_params_ranking(&self) -> anyhow::Result<Vec<usize>> {
-        let mut features = vec![Vec::new(); self.problem.params_domain.variables().len()];
-        let mut target = Vec::new();
-        for t in &self.trials {
-            for (f, &p) in features.iter_mut().zip(t.params.iter()) {
-                f.push(p);
-            }
-            target.push(t.value);
-        }
-
-        let mut fanova =
-            fanova::Fanova::fit(features.iter().map(|f| f.as_slice()).collect(), &target)?;
-        let mut importances = (0..self.problem.params_domain.variables().len())
-            .map(|i| (i, fanova.quantify_importance(&[i])))
-            .collect::<Vec<_>>();
-        importances.sort_by_key(|x| OrderedFloat(x.1.mean));
-        importances.reverse();
-        Ok(importances.into_iter().map(|x| x.0).collect::<Vec<_>>())
+        Ok(RandomForestRegressorOptions::new()
+            .trees(NonZeroUsize::new(10).unwrap())
+            .fit(Mse, table.build()?))
     }
 
     fn ask_random(&mut self) -> Params {
@@ -90,32 +75,26 @@ impl RfOpt {
         Params::new(params)
     }
 
-    fn sample(&mut self, rf: &RandomForestRegressor, params: &[f64], param_index: usize) -> f64 {
-        let mut params = params
-            .iter()
-            .copied()
-            .enumerate()
-            .filter(|x| x.1.is_finite())
-            .collect::<Vec<_>>();
-        let last = params.len();
-        params.push((param_index, 0.0));
-
-        let mut best_param = std::f64::NAN;
-        let mut best_score = std::f64::INFINITY;
-        for _ in 0..1000 {
-            let p = self.problem.params_domain.variables()[param_index].sample(&mut self.rng);
-            params[last].1 = p;
-
-            let (mean, stddev) = mean_and_stddev(rf.marginal_predict_individuals(&params));
-            let score = mean - stddev * 2f64.powi(self.level);
-            if score < best_score {
-                best_param = p;
-                best_score = score;
-            }
-        }
-
-        best_param
+    fn score(&self, fmin: f64, mean: f64, stddev: f64) -> f64 {
+        let u = (fmin - mean) / stddev;
+        let ei = stddev * (u * cdf(u) + pdf(u));
+        // let var = stddev.powi(2);
+        // let v = (fmin.ln() - mean) / stddev;
+        // let ei = fmin * cdf(v) - (0.5 * var + mean).exp() * cdf(v - stddev);
+        -ei
     }
+}
+
+fn cdf(x: f64) -> f64 {
+    use rustats::distributions::Cdf;
+
+    rustats::distributions::StandardNormal.cdf(&x)
+}
+
+fn pdf(x: f64) -> f64 {
+    use rustats::distributions::Pdf;
+
+    rustats::distributions::StandardNormal.pdf(&x)
 }
 
 impl Solver for RfOpt {
@@ -126,12 +105,20 @@ impl Solver for RfOpt {
             self.ask_random()
         } else {
             let rf = self.fit_rf().expect("TODO");
-            let ranking = self.calc_params_ranking().expect("TODO");
-            let mut params = vec![std::f64::NAN; self.problem.params_domain.variables().len()];
-            for i in ranking {
-                params[i] = self.sample(&rf, &params, i);
+            let mut best_params = Params::new(vec![0.0]);
+            let mut best_score = std::f64::INFINITY;
+            let best_mean = self.best_value; //rf.predict(self.best_params.get());
+            for _ in 0..5000 {
+                let params = self.ask_random();
+                let (mean, stddev) = mean_and_stddev(rf.predict_individuals(params.get()));
+                let score = self.score(best_mean, mean, stddev); // * 2f64.powi(self.level));
+                                                                 //let score = mean - stddev * 2f64.powi(self.level);
+                if score < best_score {
+                    best_params = params;
+                    best_score = score;
+                }
             }
-            Params::new(params)
+            best_params
         };
 
         self.evaluating.insert(id, params.clone());
@@ -145,17 +132,26 @@ impl Solver for RfOpt {
     fn tell(&mut self, trial: EvaluatedTrial) -> kurobako_core::Result<()> {
         let params = self.evaluating.remove(&trial.id).expect("TODO");
         self.trials.push(Trial {
-            params: params.into_vec(),
+            params: params.clone().into_vec(),
             value: trial.values[0],
         });
+
+        // eprintln!(
+        //     "[{}]\t{}\t{}\t{}",
+        //     self.trials.len(),
+        //     self.level,
+        //     trial.values[0],
+        //     self.best_value
+        // );
 
         // TODO
         if trial.values[0] < self.best_value {
             self.best_value = trial.values[0];
+            self.best_params = params;
             self.level += 1;
         } else {
             self.level -= 1;
-            if self.level == -5 {
+            if self.level == -3 {
                 self.level = 2;
             }
         }
