@@ -7,10 +7,13 @@ use std::collections::HashMap;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
-struct Opt {}
+struct Opt {
+    #[structopt(flatten)]
+    options: rfopt::Options,
+}
 
 fn main() -> anyhow::Result<()> {
-    let _opt = Opt::from_args();
+    let opt = Opt::from_args();
     let stdout = std::io::stdout();
     let stdin = std::io::stdin();
     let mut tx = MessageSender::new(stdout.lock());
@@ -33,7 +36,7 @@ fn main() -> anyhow::Result<()> {
                 random_seed,
                 problem,
             } => {
-                let opt = rfopt::RfOpt::new(random_seed, problem);
+                let opt = rfopt::RfOpt::new(random_seed, problem, opt.options.clone());
                 solvers.insert(solver_id, opt);
             }
             SolverMessage::AskCall {
