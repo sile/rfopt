@@ -24,7 +24,7 @@ pub struct Options {
     #[structopt(long)]
     pub predicted_best_mean: bool,
 
-    #[structopt(long, default_value = "100")]
+    #[structopt(long, default_value = "200")]
     pub trees: NonZeroUsize,
 
     #[structopt(long, default_value = "10")]
@@ -32,6 +32,9 @@ pub struct Options {
 
     #[structopt(long, default_value = "5000")]
     pub candidates: NonZeroUsize,
+
+    #[structopt(long, default_value = "8")]
+    pub batch_size: NonZeroUsize,
 }
 
 #[derive(Debug)]
@@ -43,6 +46,7 @@ pub struct RfOpt {
     best_value: f64,
     best_params: Params,
     options: Options,
+    ask_queue: Vec<Params>,
 }
 
 impl RfOpt {
@@ -55,6 +59,7 @@ impl RfOpt {
             best_value: std::f64::INFINITY,
             best_params: Params::new(Vec::new()),
             options,
+            ask_queue: Vec::new(),
         }
     }
 
@@ -125,29 +130,36 @@ impl Solver for RfOpt {
     fn ask(&mut self, idg: &mut IdGen) -> kurobako_core::Result<NextTrial> {
         let id = idg.generate();
 
-        let params = if self.trials.len() < self.options.warmup.get() {
-            self.ask_random()
-        } else {
-            let rf = self.fit_rf().expect("TODO");
-            let mut best_params = Params::new(Vec::new());
-            let mut best_score = std::f64::INFINITY;
-            let best_mean = if self.options.predicted_best_mean {
-                rf.predict(self.best_params.get())
-            } else {
-                self.best_value
-            };
-            for _ in 0..self.options.candidates.get() {
-                let params = self.ask_random();
-                let (mean, stddev) = mean_and_stddev(rf.predict_individuals(params.get()));
-                let score = self.score(best_mean, mean, stddev);
-                if score < best_score {
-                    best_params = params;
-                    best_score = score;
-                }
+        if self.ask_queue.is_empty() {
+            for _ in 0..self.options.batch_size.get() {
+                let params = if self.trials.len() < self.options.warmup.get() {
+                    self.ask_random()
+                } else {
+                    let rf = self.fit_rf().expect("TODO");
+                    let mut best_params = Params::new(Vec::new());
+                    let mut best_score = std::f64::INFINITY;
+                    let best_mean = if self.options.predicted_best_mean {
+                        rf.predict(self.best_params.get())
+                    } else {
+                        self.best_value
+                    };
+                    for _ in 0..self.options.candidates.get() {
+                        let params = self.ask_random();
+                        let (mean, stddev) = mean_and_stddev(rf.predict_individuals(params.get()));
+                        let score = self.score(best_mean, mean, stddev);
+                        if score < best_score {
+                            best_params = params;
+                            best_score = score;
+                        }
+                    }
+                    best_params
+                };
+                self.ask_queue.push(params);
             }
-            best_params
-        };
+            self.ask_queue.reverse();
+        }
 
+        let params = self.ask_queue.pop().expect("unreachable");
         self.evaluating.insert(id, params.clone());
         Ok(NextTrial {
             id,
