@@ -429,9 +429,9 @@ dependencies = [
 
 [[package]]
 name = "randomforest"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25bac8229b0174adfea5db259008ff7f3f4451915bb80b423cf787f78dd98d2b"
+checksum = "8346f8ef70970cdce426e7ad845502a80cf98ad7352c6c08079f55fe48646b8a"
 dependencies = [
  "byteorder",
  "ordered-float 2.0.0",
