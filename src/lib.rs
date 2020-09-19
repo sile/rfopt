@@ -33,7 +33,7 @@ pub struct Options {
     #[structopt(long, default_value = "5000")]
     pub candidates: NonZeroUsize,
 
-    #[structopt(long, default_value = "8")]
+    #[structopt(long, default_value = "1")]
     pub batch_size: NonZeroUsize,
 
     #[structopt(long, default_value = "1.0")]
@@ -91,7 +91,7 @@ impl RfOpt {
                 table.add_row(&t.params, std::cmp::min(n, rank) as f64)?;
             }
         } else {
-            let n = (self.trials.len() as f64 * 0.9) as usize;
+            let n = (self.trials.len() as f64 * self.options.cap) as usize;
             for t in &self.trials[..n] {
                 table.add_row(&t.params, t.value)?;
             }
@@ -163,7 +163,10 @@ impl Solver for RfOpt {
             self.ask_queue.reverse();
         }
 
-        let params = self.ask_queue.pop().expect("unreachable");
+        let mut params = self.ask_queue.pop().expect("unreachable");
+        if params.get().is_empty() {
+            params = self.ask_random();
+        }
         self.evaluating.insert(id, params.clone());
         Ok(NextTrial {
             id,
