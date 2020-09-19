@@ -35,6 +35,9 @@ pub struct Options {
 
     #[structopt(long, default_value = "8")]
     pub batch_size: NonZeroUsize,
+
+    #[structopt(long, default_value = "1.0")]
+    pub cap: f64,
 }
 
 #[derive(Debug)]
@@ -83,8 +86,9 @@ impl RfOpt {
 
         self.trials.sort_by_key(|t| OrderedFloat(t.value));
         if self.options.rank {
+            let n = (self.trials.len() as f64 * self.options.cap) as usize;
             for (rank, t) in self.trials.iter().enumerate() {
-                table.add_row(&t.params, rank as f64)?;
+                table.add_row(&t.params, std::cmp::min(n, rank) as f64)?;
             }
         } else {
             let n = (self.trials.len() as f64 * 0.9) as usize;
