@@ -36,7 +36,7 @@ fn main() -> anyhow::Result<()> {
                 random_seed,
                 problem,
             } => {
-                let opt = rfopt::RfOpt::new(random_seed, problem, opt.options.clone());
+                let opt = rfopt::Rfopt::new(random_seed, problem, opt.options.clone());
                 solvers.insert(solver_id, opt);
             }
             SolverMessage::AskCall {
