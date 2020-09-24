@@ -13,18 +13,9 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use structopt::StructOpt;
 
-const T_SUCC: usize = 3;
-const T_FAIL: usize = 1;
-const L_MIN: f64 = 0.0078125;
-const L_MAX: f64 = 1.6;
-const L_INIT: f64 = 0.8;
-
 #[derive(Debug, Clone, StructOpt)]
 #[structopt(rename_all = "kebab-case")]
 pub struct Options {
-    #[structopt(long)]
-    pub rank: bool,
-
     #[structopt(long)]
     pub debug: bool,
 
@@ -34,17 +25,20 @@ pub struct Options {
     #[structopt(long)]
     pub predicted_best_mean: bool,
 
-    #[structopt(long, default_value = "200")]
+    #[structopt(long, default_value = "100")]
     pub trees: NonZeroUsize,
 
     #[structopt(long, default_value = "8")]
     pub warmup: NonZeroUsize,
 
-    #[structopt(long, default_value = "5000")]
+    #[structopt(long, default_value = "10000")]
     pub candidates: NonZeroUsize,
 
-    #[structopt(long, default_value = "8")]
+    #[structopt(long, default_value = "1")]
     pub batch_size: NonZeroUsize,
+
+    #[structopt(long, default_value = "1.0")]
+    pub rate: f64,
 }
 
 #[derive(Debug)]
@@ -58,9 +52,6 @@ pub struct RfOpt {
     best_params: Params,
     options: Options,
     ask_queue: Vec<Params>,
-    succ: bool,
-    succ_count: usize,
-    fail_count: usize,
     l: f64,
 }
 
@@ -73,6 +64,7 @@ impl RfOpt {
         if options.debug {
             eprintln!("# SEED: {}", seed);
         }
+        let trusted = problem.params_domain.variables().to_owned();
         Self {
             problem,
             trials: Vec::new(),
@@ -82,11 +74,8 @@ impl RfOpt {
             best_params: Params::new(Vec::new()),
             options,
             ask_queue: Vec::new(),
-            trusted: Vec::new(),
-            succ: false,
-            succ_count: 0,
-            fail_count: 0,
-            l: L_INIT,
+            trusted,
+            l: 1.0,
         }
     }
 
@@ -109,24 +98,14 @@ impl RfOpt {
         table.set_feature_column_types(&columns)?;
 
         self.trials.sort_by_key(|t| OrderedFloat(t.value));
-        if self.options.rank {
-            for (rank, t) in self
-                .trials
-                .iter()
-                .filter(|t| self.is_trusted(&t.params))
-                .enumerate()
-            {
-                if self.is_trusted(&t.params) {
-                    table.add_row(&t.params, rank as f64)?;
-                }
-            }
-        } else {
-            let n = (self.trials.len() as f64 * 0.9) as usize;
-            for t in &self.trials[..n] {
-                table.add_row(&t.params, t.value)?;
-            }
-            for t in &self.trials[n..] {
-                table.add_row(&t.params, self.trials[n].value)?;
+        for (rank, t) in self
+            .trials
+            .iter()
+            .filter(|t| self.is_trusted(&t.params))
+            .enumerate()
+        {
+            if self.is_trusted(&t.params) {
+                table.add_row(&t.params, rank as f64)?;
             }
         }
 
@@ -138,21 +117,12 @@ impl RfOpt {
     }
 
     fn ask_random(&mut self) -> Params {
-        if self.trusted.is_empty() {
-            let mut params = Vec::new();
-            for p in self.problem.params_domain.variables() {
-                let param = p.sample(&mut self.rng);
-                params.push(param);
-            }
-            Params::new(params)
-        } else {
-            let mut params = Vec::new();
-            for p in &self.trusted {
-                let param = p.sample(&mut self.rng);
-                params.push(param);
-            }
-            Params::new(params)
+        let mut params = Vec::new();
+        for p in &self.trusted {
+            let param = p.sample(&mut self.rng);
+            params.push(param);
         }
+        Params::new(params)
     }
 
     fn score(&self, fmin: f64, mean: f64, stddev: f64) -> f64 {
@@ -161,25 +131,8 @@ impl RfOpt {
         -ei
     }
 
-    fn init_tr(&mut self) {
-        self.l = L_INIT;
-        self.succ = false;
-        self.succ_count = 0;
-        self.fail_count = 0;
-
-        self.update_tr();
-    }
-
-    fn expand_tr(&mut self) {
-        self.l = (self.l * 2.0).min(L_MAX);
-        self.update_tr();
-    }
-
     fn shrink_tr(&mut self) {
-        self.l = self.l / 2.0;
-        if self.l < L_MIN {
-            self.init_tr();
-        }
+        self.l = self.l * self.options.rate;
         self.update_tr();
     }
 
@@ -291,10 +244,6 @@ impl Solver for RfOpt {
                 let mut params = if self.trials.len() < self.options.warmup.get() {
                     self.ask_random()
                 } else {
-                    if self.trusted.is_empty() {
-                        self.init_tr();
-                    }
-
                     let rf = self.fit_rf().expect("TODO");
                     let mut best_params = Params::new(Vec::new());
                     let mut best_score = std::f64::INFINITY;
@@ -344,28 +293,10 @@ impl Solver for RfOpt {
         if trial.values[0] < self.best_value {
             self.best_value = trial.values[0];
             self.best_params = params;
-            self.succ = true;
         }
 
-        if self.trials.len() % 8 == 0 {
-            if self.succ {
-                self.succ_count += 1;
-                self.fail_count = 0;
-            } else {
-                self.succ_count = 0;
-                self.fail_count += 1;
-            }
-            self.succ = false;
-            if self.succ_count >= T_SUCC {
-                self.succ_count = 0;
-                self.fail_count = 0;
-                self.expand_tr();
-            }
-            if self.fail_count >= T_FAIL {
-                self.succ_count = 0;
-                self.fail_count = 0;
-                self.shrink_tr();
-            }
+        if self.trials.len() % 16 == 0 {
+            self.shrink_tr();
         }
 
         if self.options.debug {
