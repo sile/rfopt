@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 anyhow = "1"
+friedrich = "*"
 kurobako_core = "0.1.8"
 ordered-float = "2"
 rand = "0.7"
