@@ -28,6 +28,9 @@ pub struct Options {
 
     #[structopt(long)]
     pub gp: bool,
+
+    #[structopt(long)]
+    pub switch: bool,
 }
 
 pub struct Gp {
@@ -91,6 +94,8 @@ pub struct Rfopt {
     rng: ArcRng,
     best_value: f64,
     options: Options,
+    sames: usize,
+    prev: f64,
 }
 
 impl Rfopt {
@@ -102,6 +107,8 @@ impl Rfopt {
             rng: ArcRng::new(seed),
             best_value: std::f64::INFINITY,
             options,
+            sames: 0,
+            prev: std::f64::NAN,
         }
     }
 
@@ -158,7 +165,7 @@ impl Solver for Rfopt {
         let mut next_params = Params::new(Vec::new());
 
         if self.trials.len() >= self.options.warmup.get() {
-            if self.options.gp {
+            if self.options.gp || (self.options.switch && self.trials.len() % 2 == 0) {
                 let gp = self.fit_gp().expect("TODO: error handling");
                 let mut best_ei = std::f64::NEG_INFINITY;
                 let best_mean = self.best_value;
@@ -213,12 +220,25 @@ impl Solver for Rfopt {
             self.best_value = trial.values[0];
         }
 
-        eprintln!(
-            "[{}]\t{}\t{}",
-            self.trials.len(),
-            trial.values[0],
-            self.best_value
-        );
+        // eprintln!(
+        //     "[{}]\t{}\t{} ({})",
+        //     self.trials.len(),
+        //     trial.values[0],
+        //     self.best_value,
+        //     self.sames
+        // );
+
+        if (trial.values[0] - self.prev).abs() < std::f64::EPSILON {
+            self.sames += 1;
+        } else {
+            self.sames = 0;
+        }
+        self.prev = trial.values[0];
+        if self.sames >= 5 {
+            self.trials.clear();
+            self.sames = 0;
+            self.prev = std::f64::NAN;
+        }
 
         Ok(())
     }
