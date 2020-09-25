@@ -3,7 +3,7 @@ name = "rfopt"
 version = "0.1.0"
 authors = ["Takeru Ohta <phjgt308@gmail.com>"]
 edition = "2018"
-publish = "false"
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
