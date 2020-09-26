@@ -31,6 +31,9 @@ pub struct Options {
 
     #[structopt(long)]
     pub switch: bool,
+
+    #[structopt(long, default_value = "1.0")]
+    pub shrink_rate: f64,
 }
 
 pub struct Gp {
@@ -38,39 +41,38 @@ pub struct Gp {
         friedrich::kernel::Gaussian,
         friedrich::prior::ConstantPrior,
     >,
-    problem: ProblemSpec,
+    trusted: Vec<kurobako_core::domain::Variable>,
 }
 
 impl Gp {
-    pub fn new(problem: &ProblemSpec, trials: &[Trial]) -> Self {
+    pub fn new<F: Fn(&[f64]) -> bool>(
+        trusted: Vec<kurobako_core::domain::Variable>,
+        trials: &[Trial],
+        f: F,
+    ) -> Self {
         let mut xss = Vec::new();
         let mut ys = Vec::new();
 
-        for (rank, trial) in trials.iter().enumerate() {
-            let params = Self::normalize(problem, &trial.params);
+        for (rank, trial) in trials.iter().filter(|t| f(&t.params)).enumerate() {
+            let params = Self::normalize(&trusted, &trial.params);
             xss.push(params);
             ys.push(rank as f64);
         }
 
         let mut inner = friedrich::gaussian_process::GaussianProcess::default(xss, ys);
         inner.fit_parameters(true, true, 100, 0.05);
-        Self {
-            problem: problem.clone(),
-            inner,
-        }
+        Self { trusted, inner }
     }
 
     pub fn predict(&self, params: &[f64]) -> (f64, f64) {
-        let params = Self::normalize(&self.problem, params);
+        let params = Self::normalize(&self.trusted, params);
         let mean = self.inner.predict(&params);
         let var = self.inner.predict_variance(&params);
         (mean, var.sqrt())
     }
 
-    fn normalize(problem: &ProblemSpec, params: &[f64]) -> Vec<f64> {
-        problem
-            .params_domain
-            .variables()
+    fn normalize(trusted: &[kurobako_core::domain::Variable], params: &[f64]) -> Vec<f64> {
+        trusted
             .iter()
             .zip(params.iter())
             .map(|(p, v)| {
@@ -96,10 +98,15 @@ pub struct Rfopt {
     options: Options,
     sames: usize,
     prev: f64,
+    l: f64,
+    trusted: Vec<kurobako_core::domain::Variable>,
+    best_params: Params,
 }
 
 impl Rfopt {
     pub fn new(seed: u64, problem: ProblemSpec, options: Options) -> Self {
+        let trusted = problem.params_domain.variables().to_owned();
+
         Self {
             problem,
             trials: Vec::new(),
@@ -109,6 +116,9 @@ impl Rfopt {
             options,
             sames: 0,
             prev: std::f64::NAN,
+            l: 1.0,
+            trusted,
+            best_params: Params::new(Vec::new()),
         }
     }
 
@@ -130,7 +140,12 @@ impl Rfopt {
         table.set_feature_column_types(&columns)?;
 
         self.trials.sort_by_key(|t| OrderedFloat(t.value));
-        for (rank, trial) in self.trials.iter().enumerate() {
+        for (rank, trial) in self
+            .trials
+            .iter()
+            .filter(|t| self.is_trusted(&t.params))
+            .enumerate()
+        {
             table.add_row(&trial.params, rank as f64)?;
         }
 
@@ -141,21 +156,130 @@ impl Rfopt {
     }
 
     fn fit_gp(&mut self) -> anyhow::Result<Gp> {
-        self.trials.sort_by_key(|t| OrderedFloat(t.value));
-        let gp = Gp::new(&self.problem, &self.trials);
+        use anyhow::anyhow;
+
+        let gp = crossbeam::scope(|scope| {
+            let h = scope.spawn(|_| {
+                self.trials.sort_by_key(|t| OrderedFloat(t.value));
+                let gp = Gp::new(self.trusted.clone(), &self.trials, |params| {
+                    self.is_trusted(params)
+                });
+                gp
+            });
+            h.join()
+        })
+        .map_err(|e| anyhow!("{:?}", e))?
+        .map_err(|e| anyhow!("{:?}", e))?;
         Ok(gp)
     }
 
     fn ask_random(&mut self) -> Params {
-        let rng = &mut self.rng;
-        Params::new(
-            self.problem
-                .params_domain
-                .variables()
-                .iter()
-                .map(|p| p.sample(rng))
-                .collect(),
-        )
+        let mut params = Vec::new();
+        for p in &self.trusted {
+            let param = p.sample(&mut self.rng);
+            params.push(param);
+        }
+        Params::new(params)
+    }
+
+    fn shrink_tr(&mut self) {
+        self.l = self.l * self.options.shrink_rate;
+        self.update_tr();
+    }
+
+    fn update_tr(&mut self) {
+        use kurobako_core::domain::{self, Range};
+
+        let mut trusted = Vec::new();
+        for (p, v) in self
+            .problem
+            .params_domain
+            .variables()
+            .iter()
+            .zip(self.best_params.iter())
+        {
+            match p.range() {
+                Range::Categorical { .. } => {
+                    // TODO: handle categorical
+                    trusted.push(p.clone());
+                }
+
+                Range::Continuous { low, high } => {
+                    if p.distribution() == kurobako_core::domain::Distribution::Uniform {
+                        let half_size = (high - low) * self.l / 2.0;
+                        let center = *v;
+                        let mut new_low = center - half_size;
+                        let mut new_high = center + half_size;
+                        if new_low < *low {
+                            new_high += *low - new_low;
+                            new_low = *low;
+                        } else if new_high > *high {
+                            new_low -= new_high - *high;
+                            new_high = *high;
+                        }
+
+                        trusted.push(
+                            domain::var(p.name())
+                                .continuous(new_low.max(*low), new_high.min(*high))
+                                .finish()
+                                .expect("TOOD"),
+                        );
+                    } else {
+                        let half_size = (high.exp2() - low.exp2()) * self.l / 2.0;
+                        let center = v.exp2();
+                        let mut new_low = center - half_size;
+                        let mut new_high = center + half_size;
+                        if new_low < low.exp2() {
+                            new_high += low.exp2() - new_low;
+                            new_low = low.exp2();
+                        } else if new_high > high.exp2() {
+                            new_low -= new_high - high.exp2();
+                            new_high = high.exp2();
+                        }
+
+                        trusted.push(
+                            domain::var(p.name())
+                                .continuous(new_low.log2().max(*low), new_high.log2().min(*high))
+                                .log_uniform()
+                                .finish()
+                                .expect("TOOD"),
+                        );
+                    }
+                }
+                Range::Discrete { low, high } => {
+                    let half_size = ((high - low) as f64 * self.l / 2.0).round() as i64;
+                    let center = *v as i64;
+                    let mut new_low = center - half_size;
+                    let mut new_high = center + half_size;
+                    if new_low < *low {
+                        new_high += *low - new_low;
+                        new_low = *low;
+                    } else if new_high > *high {
+                        new_low -= new_high - *high;
+                        new_high = *high;
+                    }
+                    if new_low == new_high {
+                        new_high += 1;
+                    }
+
+                    trusted.push(
+                        domain::var(p.name())
+                            .discrete(std::cmp::max(new_low, *low), std::cmp::min(new_high, *high))
+                            .finish()
+                            .expect("TOOD"),
+                    );
+                }
+            }
+        }
+
+        self.trusted = trusted;
+    }
+
+    fn is_trusted(&self, params: &[f64]) -> bool {
+        self.trusted
+            .iter()
+            .zip(params.iter())
+            .all(|(p, v)| p.range().contains(*v))
     }
 }
 
@@ -166,19 +290,26 @@ impl Solver for Rfopt {
 
         if self.trials.len() >= self.options.warmup.get() {
             if self.options.gp || (self.options.switch && self.trials.len() % 2 == 0) {
-                let gp = self.fit_gp().expect("TODO: error handling");
-                let mut best_ei = std::f64::NEG_INFINITY;
-                let best_mean = self.best_value;
-                for _ in 0..self.options.candidates.get() {
-                    let params = self.ask_random();
-                    let (mean, stddev) = gp.predict(params.get());
-                    let ei = ei(best_mean, mean, stddev);
-                    if ei > best_ei {
-                        next_params = params;
-                        best_ei = ei;
+                match self.fit_gp() {
+                    Err(e) => {
+                        eprintln!("Cannot fit GP model: {}", e);
+                    }
+                    Ok(gp) => {
+                        let mut best_ei = std::f64::NEG_INFINITY;
+                        let best_mean = self.best_value;
+                        for _ in 0..self.options.candidates.get() {
+                            let params = self.ask_random();
+                            let (mean, stddev) = gp.predict(params.get());
+                            let ei = ei(best_mean, mean, stddev);
+                            if ei > best_ei {
+                                next_params = params;
+                                best_ei = ei;
+                            }
+                        }
                     }
                 }
-            } else {
+            }
+            if next_params.get().is_empty() {
                 let rf = self.fit_rf().expect("TODO: error handling");
                 let mut best_ei = std::f64::NEG_INFINITY;
                 let best_mean = self.best_value;
@@ -212,20 +343,29 @@ impl Solver for Rfopt {
             .remove(&trial.id)
             .expect("TODO: error handling");
         self.trials.push(Trial {
-            params: params.into_vec(),
+            params: params.clone().into_vec(),
             value: trial.values[0],
         });
 
         if trial.values[0] < self.best_value {
             self.best_value = trial.values[0];
+            self.best_params = params;
+        }
+
+        if self.trials.len() % 16 == 0 {
+            self.shrink_tr();
         }
 
         // eprintln!(
-        //     "[{}]\t{}\t{} ({})",
+        //     "[{}]\t{}\t{} ({}, {})",
         //     self.trials.len(),
         //     trial.values[0],
         //     self.best_value,
-        //     self.sames
+        //     self.sames,
+        //     self.trials
+        //         .iter()
+        //         .filter(|t| !self.is_trusted(&t.params))
+        //         .count()
         // );
 
         if (trial.values[0] - self.prev).abs() < std::f64::EPSILON {
@@ -238,6 +378,8 @@ impl Solver for Rfopt {
             self.trials.clear();
             self.sames = 0;
             self.prev = std::f64::NAN;
+            self.trusted = self.problem.params_domain.variables().to_owned();
+            self.l = 1.0;
         }
 
         Ok(())

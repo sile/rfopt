@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 anyhow = "1"
+crossbeam = "*"
 friedrich = "*"
 kurobako_core = "0.1.8"
 ordered-float = "2"
