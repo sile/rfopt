@@ -26,12 +26,6 @@ pub struct Options {
     #[structopt(long, default_value = "10")]
     pub warmup: NonZeroUsize,
 
-    #[structopt(long)]
-    pub gp: bool,
-
-    #[structopt(long)]
-    pub switch: bool,
-
     #[structopt(long, default_value = "1.0")]
     pub shrink_rate: f64,
 }
@@ -281,6 +275,83 @@ impl Rfopt {
             .zip(params.iter())
             .all(|(p, v)| p.range().contains(*v))
     }
+
+    fn ask_tpe(&mut self) -> Params {
+        let mut optimizers = Vec::new();
+        for p in &self.trusted {
+            let r = Self::warp_range(p);
+            optimizers.push(tpe::TpeOptimizer::new(
+                tpe::ParzenEstimatorBuilder::default(),
+                r,
+            ));
+        }
+
+        for trial in self.trials.iter().filter(|t| self.is_trusted(&t.params)) {
+            for ((o, p), v) in optimizers
+                .iter_mut()
+                .zip(trial.params.iter().copied())
+                .zip(self.trusted.iter())
+            {
+                let p = Self::warp_param(p, v);
+                o.tell(p, trial.value).expect("unreachable");
+            }
+        }
+
+        let rng = &mut self.rng;
+        let params = optimizers
+            .iter_mut()
+            .zip(self.trusted.iter())
+            .map(|(o, p)| Self::unwarp_param(o.ask(rng), p))
+            .collect();
+        Params::new(params)
+    }
+
+    fn warp_range(p: &kurobako_core::domain::Variable) -> tpe::ParamRange {
+        match p.range() {
+            kurobako_core::domain::Range::Continuous { low, high } => {
+                if p.distribution() == kurobako_core::domain::Distribution::Uniform {
+                    tpe::ParamRange::new(*low, *high).expect("unreachable")
+                } else {
+                    tpe::ParamRange::new(low.ln(), high.ln()).expect("unreachable")
+                }
+            }
+            kurobako_core::domain::Range::Discrete { low, high } => {
+                tpe::ParamRange::new(*low as f64, *high as f64).expect("unreachable")
+            }
+            kurobako_core::domain::Range::Categorical { choices } => {
+                // TODO: For a categorical parameter, we should use `HistogramEstimator` instead `ParzenEstimator`.
+                tpe::ParamRange::new(0.0, choices.len() as f64).expect("unreachable")
+            }
+        }
+    }
+
+    fn warp_param(p: f64, v: &kurobako_core::domain::Variable) -> f64 {
+        match v.range() {
+            kurobako_core::domain::Range::Continuous { .. } => {
+                if v.distribution() == kurobako_core::domain::Distribution::Uniform {
+                    p
+                } else {
+                    p.ln()
+                }
+            }
+            kurobako_core::domain::Range::Discrete { .. } => p + 0.5,
+            kurobako_core::domain::Range::Categorical { .. } => p,
+        }
+    }
+
+    fn unwarp_param(p: f64, v: &kurobako_core::domain::Variable) -> f64 {
+        match v.range() {
+            kurobako_core::domain::Range::Continuous { .. } => {
+                if v.distribution() == kurobako_core::domain::Distribution::Uniform {
+                    p
+                } else {
+                    p.exp()
+                }
+            }
+            kurobako_core::domain::Range::Discrete { .. } => p.floor(),
+            kurobako_core::domain::Range::Categorical { .. } => p.round(),
+        }
+    }
 }
 
 impl Solver for Rfopt {
@@ -289,7 +360,7 @@ impl Solver for Rfopt {
         let mut next_params = Params::new(Vec::new());
 
         if self.trials.len() >= self.options.warmup.get() {
-            if self.options.gp || (self.options.switch && self.trials.len() % 2 == 0) {
+            if self.trials.len() % 3 == 0 {
                 match self.fit_gp() {
                     Err(e) => {
                         eprintln!("Cannot fit GP model: {}", e);
@@ -309,7 +380,7 @@ impl Solver for Rfopt {
                     }
                 }
             }
-            if next_params.get().is_empty() {
+            if next_params.get().is_empty() || self.trials.len() % 3 == 1 {
                 let rf = self.fit_rf().expect("TODO: error handling");
                 let mut best_ei = std::f64::NEG_INFINITY;
                 let best_mean = self.best_value;
@@ -322,6 +393,9 @@ impl Solver for Rfopt {
                         best_ei = ei;
                     }
                 }
+            }
+            if next_params.get().is_empty() {
+                next_params = self.ask_tpe();
             }
         }
 

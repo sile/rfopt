@@ -623,6 +623,7 @@ dependencies = [
  "randomforest",
  "rustats",
  "structopt",
+ "tpe",
 ]
 
 [[package]]
@@ -702,6 +703,16 @@ dependencies = [
  "digest",
  "fake-simd",
  "opaque-debug",
+]
+
+[[package]]
+name = "statrs"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e34b58a8f9b7462b6922e0b4e3c83d1b3c2075f7f996a56d6c66afa81590064"
+dependencies = [
+ "nalgebra",
+ "rand",
 ]
 
 [[package]]
@@ -786,6 +797,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tpe"
+version = "0.1.0"
+dependencies = [
+ "ordered-float 2.0.0",
+ "rand",
+ "rand_distr",
+ "statrs",
+ "thiserror",
 ]
 
 [[package]]
