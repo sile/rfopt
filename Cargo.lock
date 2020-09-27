@@ -228,7 +228,7 @@ checksum = "491d7f95260fa979eba6b3f862f170202ae21dfb8185c8c0a209120b5b259bbb"
 dependencies = [
  "nalgebra",
  "rand",
- "rand_distr",
+ "rand_distr 0.2.2",
 ]
 
 [[package]]
@@ -374,7 +374,7 @@ dependencies = [
  "num-rational",
  "num-traits",
  "rand",
- "rand_distr",
+ "rand_distr 0.2.2",
  "typenum",
 ]
 
@@ -543,6 +543,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_distr"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9e9532ada3929fb8b2e9dbe28d1e06c9b2cc65813f074fcb6bd5fbefeff9d56"
+dependencies = [
+ "num-traits",
+ "rand",
+]
+
+[[package]]
 name = "rand_hc"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -647,7 +657,7 @@ checksum = "d23cb73b9b0998e1f0a2151fe78aa924ad248de619134858732d28d68ae7eb8e"
 dependencies = [
  "libm",
  "rand",
- "rand_distr",
+ "rand_distr 0.2.2",
 ]
 
 [[package]]
@@ -802,10 +812,12 @@ dependencies = [
 [[package]]
 name = "tpe"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fabe5405a56848033cc6626ac02807dea2f0440b9801acd08489bd3693c731ed"
 dependencies = [
  "ordered-float 2.0.0",
  "rand",
- "rand_distr",
+ "rand_distr 0.3.0",
  "statrs",
  "thiserror",
 ]

@@ -280,10 +280,7 @@ impl Rfopt {
         let mut optimizers = Vec::new();
         for p in &self.trusted {
             let r = Self::warp_range(p);
-            optimizers.push(tpe::TpeOptimizer::new(
-                tpe::ParzenEstimatorBuilder::default(),
-                r,
-            ));
+            optimizers.push(tpe::TpeOptimizer::new(tpe::parzen_estimator(), r));
         }
 
         for trial in self.trials.iter().filter(|t| self.is_trusted(&t.params)) {
@@ -301,26 +298,26 @@ impl Rfopt {
         let params = optimizers
             .iter_mut()
             .zip(self.trusted.iter())
-            .map(|(o, p)| Self::unwarp_param(o.ask(rng), p))
+            .map(|(o, p)| Self::unwarp_param(o.ask(rng).expect("unreachable"), p))
             .collect();
         Params::new(params)
     }
 
-    fn warp_range(p: &kurobako_core::domain::Variable) -> tpe::ParamRange {
+    fn warp_range(p: &kurobako_core::domain::Variable) -> tpe::range::Range {
         match p.range() {
             kurobako_core::domain::Range::Continuous { low, high } => {
                 if p.distribution() == kurobako_core::domain::Distribution::Uniform {
-                    tpe::ParamRange::new(*low, *high).expect("unreachable")
+                    tpe::range(*low, *high).expect("unreachable")
                 } else {
-                    tpe::ParamRange::new(low.ln(), high.ln()).expect("unreachable")
+                    tpe::range(low.ln(), high.ln()).expect("unreachable")
                 }
             }
             kurobako_core::domain::Range::Discrete { low, high } => {
-                tpe::ParamRange::new(*low as f64, *high as f64).expect("unreachable")
+                tpe::range(*low as f64, *high as f64).expect("unreachable")
             }
             kurobako_core::domain::Range::Categorical { choices } => {
                 // TODO: For a categorical parameter, we should use `HistogramEstimator` instead `ParzenEstimator`.
-                tpe::ParamRange::new(0.0, choices.len() as f64).expect("unreachable")
+                tpe::range(0.0, choices.len() as f64).expect("unreachable")
             }
         }
     }

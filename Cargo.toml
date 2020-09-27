@@ -17,4 +17,4 @@ rand = "0.7"
 randomforest = "0.1.5"
 rustats = "*"
 structopt = "0.3"
-tpe = { path = "../tpe/" }
+tpe = "0.1"
