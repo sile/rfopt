@@ -28,6 +28,9 @@ pub struct Options {
 
     #[structopt(long, default_value = "1.0")]
     pub shrink_rate: f64,
+
+    #[structopt(long, default_value = "1")]
+    pub batch_size: NonZeroUsize,
 }
 
 pub struct Gp {
@@ -95,6 +98,8 @@ pub struct Rfopt {
     l: f64,
     trusted: Vec<kurobako_core::domain::Variable>,
     best_params: Params,
+    ask_queue: Vec<Params>,
+    ask_count: usize,
 }
 
 impl Rfopt {
@@ -113,6 +118,8 @@ impl Rfopt {
             l: 1.0,
             trusted,
             best_params: Params::new(Vec::new()),
+            ask_queue: Vec::new(),
+            ask_count: 0,
         }
     }
 
@@ -349,15 +356,12 @@ impl Rfopt {
             kurobako_core::domain::Range::Categorical { .. } => p.round(),
         }
     }
-}
 
-impl Solver for Rfopt {
-    fn ask(&mut self, idg: &mut IdGen) -> kurobako_core::Result<NextTrial> {
-        let id = idg.generate();
+    fn ask_params(&mut self) -> kurobako_core::Result<Params> {
         let mut next_params = Params::new(Vec::new());
 
         if self.trials.len() >= self.options.warmup.get() {
-            if self.trials.len() % 3 == 0 {
+            if self.ask_count % 3 == 0 {
                 match self.fit_gp() {
                     Err(e) => {
                         eprintln!("Cannot fit GP model: {}", e);
@@ -377,7 +381,7 @@ impl Solver for Rfopt {
                     }
                 }
             }
-            if next_params.get().is_empty() || self.trials.len() % 3 == 1 {
+            if next_params.get().is_empty() || self.ask_count % 3 == 1 {
                 let rf = self.fit_rf().expect("TODO: error handling");
                 let mut best_ei = std::f64::NEG_INFINITY;
                 let best_mean = self.best_value;
@@ -399,6 +403,23 @@ impl Solver for Rfopt {
         if next_params.get().is_empty() {
             next_params = self.ask_random();
         }
+
+        self.ask_count += 1;
+        Ok(next_params)
+    }
+}
+
+impl Solver for Rfopt {
+    fn ask(&mut self, idg: &mut IdGen) -> kurobako_core::Result<NextTrial> {
+        let id = idg.generate();
+        if self.ask_queue.is_empty() {
+            self.ask_queue = (0..self.options.batch_size.get())
+                .map(|_| self.ask_params())
+                .collect::<kurobako_core::Result<Vec<_>>>()?;
+            self.ask_queue.reverse();
+        }
+
+        let next_params = self.ask_queue.pop().expect("unreachable");
         self.evaluating.insert(id, next_params.clone());
 
         Ok(NextTrial {
