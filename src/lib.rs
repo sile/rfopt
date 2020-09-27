@@ -32,7 +32,8 @@ pub struct Options {
 
 pub struct Gp {
     inner: friedrich::gaussian_process::GaussianProcess<
-        friedrich::kernel::Gaussian,
+        //friedrich::kernel::Gaussian,
+        friedrich::kernel::Matern2,
         friedrich::prior::ConstantPrior,
     >,
     trusted: Vec<kurobako_core::domain::Variable>,
@@ -53,8 +54,12 @@ impl Gp {
             ys.push(rank as f64);
         }
 
-        let mut inner = friedrich::gaussian_process::GaussianProcess::default(xss, ys);
-        inner.fit_parameters(true, true, 100, 0.05);
+        let inner = friedrich::gaussian_process::GaussianProcess::builder(xss, ys)
+            .set_kernel(friedrich::kernel::Matern2::default())
+            .fit_kernel()
+            .fit_prior()
+            .train();
+        //inner.fit_parameters(true, true, 100, 0.05);
         Self { trusted, inner }
     }
 
