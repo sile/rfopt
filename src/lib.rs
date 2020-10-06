@@ -98,7 +98,7 @@ impl Solver for Rfopt {
         if self.trials.len() >= self.options.warmup.get() {
             let rf = self.fit_rf().expect("TODO: error handling");
             let mut best_ei = std::f64::NEG_INFINITY;
-            let best_mean = self.best_value;
+            let best_mean = self.best_value; // TODO: use `0` if `rank` is enabled
             for _ in 0..self.options.candidates.get() {
                 let params = self.ask_random();
                 let (mean, stddev) = mean_and_stddev(rf.predict_individuals(params.get()));
