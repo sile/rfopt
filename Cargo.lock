@@ -589,7 +589,7 @@ dependencies = [
  "clap 4.4.11",
  "kurobako_core",
  "ordered-float",
- "rand 0.7.3",
+ "rand 0.8.5",
  "randomforest",
  "rustats",
 ]

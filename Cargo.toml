@@ -12,6 +12,6 @@ anyhow = "1"
 clap = { version = "4.4.11", features = ["derive"] }
 kurobako_core = "0.1.8"
 ordered-float = "2"
-rand = "0.7"
+rand = "0.8"
 randomforest = "0.1.5"
 rustats = "*"
