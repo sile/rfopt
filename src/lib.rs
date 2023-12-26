@@ -12,18 +12,16 @@ use rustats::distributions::StandardNormal;
 use rustats::distributions::{Cdf, Pdf};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use structopt::StructOpt;
 
-#[derive(Debug, Clone, StructOpt)]
-#[structopt(rename_all = "kebab-case")]
+#[derive(Debug, Clone, clap::Args)]
 pub struct Options {
-    #[structopt(long, default_value = "100")]
+    #[clap(long, default_value = "100")]
     pub trees: NonZeroUsize,
 
-    #[structopt(long, default_value = "10000")]
+    #[clap(long, default_value = "10000")]
     pub candidates: NonZeroUsize,
 
-    #[structopt(long, default_value = "10")]
+    #[clap(long, default_value = "10")]
     pub warmup: NonZeroUsize,
 }
 
@@ -57,7 +55,7 @@ impl Rfopt {
             .variables()
             .iter()
             .map(|v| {
-                if matches!(v.range(), kurobako_core::domain::Range::Categorical{..}) {
+                if matches!(v.range(), kurobako_core::domain::Range::Categorical { .. }) {
                     ColumnType::Categorical
                 } else {
                     ColumnType::Numerical

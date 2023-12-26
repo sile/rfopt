@@ -1,19 +1,19 @@
 use anyhow::anyhow;
+use clap::Parser;
 use kurobako_core::epi::channel::{MessageReceiver, MessageSender};
 use kurobako_core::epi::solver::SolverMessage;
 use kurobako_core::solver::{Capability, Solver as _, SolverSpecBuilder};
 use kurobako_core::trial::IdGen;
 use std::collections::HashMap;
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 struct Opt {
-    #[structopt(flatten)]
+    #[clap(flatten)]
     options: rfopt::Options,
 }
 
 fn main() -> anyhow::Result<()> {
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
     let stdout = std::io::stdout();
     let stdin = std::io::stdin();
     let mut tx = MessageSender::new(stdout.lock());
